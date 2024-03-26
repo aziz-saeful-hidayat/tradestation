@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pdfquery
 import pandas as pd
 import os
@@ -100,6 +102,60 @@ class TradeStationAccountStatement(object):
         writer.close()
 
 
+class TradeStationSummaries(object):
+    account_number = ''
+    input_path = ''
+    output_path = ''
+    summaries = []
+
+    def __init__(self, account_number='210YK835', input_path='files', output_path='results'):
+        self.account_number = account_number
+        self.input_path = input_path
+        self.output_path = output_path
+
+    def summary_to_dataframe(self, summary):
+        newdict = summary.copy()
+
+        for key, value in newdict.items():
+            if key == "statement_date":
+                date_obj = datetime.strptime(newdict[key]["value"], "%b %d, %Y")
+                newdict[key] = date_obj.strftime("%-m/%-d/%y")
+            elif newdict[key]["type"] == "LTTextLineHorizontal":
+                value = newdict[key]["value"]
+                if value.startswith("."):
+                    value = "0" + str(value)
+                if "DR" in value:
+                    value = "-" + str(value)
+                    value = value.replace("DR", "")
+                value = value.replace(",", "")
+                if value != "":
+                    value = float(value)
+                newdict[key] = value
+            else:
+                newdict[key] = newdict[key]["value"]
+
+        return newdict
+
+    def convert_files(self):
+        for filename in os.listdir(self.input_path):
+            if '.pdf' in filename and filename.startswith(self.account_number):
+                f = os.path.join(self.input_path, filename)
+                o = os.path.join(self.output_path, filename.replace('.pdf', '.xlsx'))
+                # checking if it is a file
+                if os.path.isfile(f):
+                    print(f)
+                    statement = TradeStationAccountStatement(f)
+                    statement.find_summary()
+                    self.summaries.append(self.summary_to_dataframe(statement.summary))
+
+    def write_to_excel(self):
+        sorted_data = sorted(self.summaries, key=lambda d: d['statement_date'])
+        df = pd.DataFrame(sorted_data)
+        writer = pd.ExcelWriter("summary.xlsx", engine='openpyxl', mode="a", if_sheet_exists="replace")
+        df.to_excel(writer, sheet_name='Summary', index=False)
+        writer.close()
+
+
 def pdf_to_excel(pdf_file_path, excel_file_path):
     statement = TradeStationAccountStatement(pdf_file_path)
     statement.find_summary()
@@ -107,13 +163,6 @@ def pdf_to_excel(pdf_file_path, excel_file_path):
 
 
 if __name__ == "__main__":
-    directory = 'files'
-    output = 'results'
-    for filename in os.listdir(directory):
-        if '.pdf' in filename:
-            f = os.path.join(directory, filename)
-            o = os.path.join(output, filename.replace('.pdf', '.xlsx'))
-            # checking if it is a file
-            if os.path.isfile(f):
-                print(f)
-                pdf_to_excel(f, o)
+    summary = TradeStationSummaries(account_number='210YK835', input_path='files', output_path='results')
+    summary.convert_files()
+    summary.write_to_excel()
